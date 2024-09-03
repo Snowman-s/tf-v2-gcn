@@ -9,7 +9,7 @@ setup(name='kegra',
       url='https://tkipf.github.io',
       download_url='...',
       license='MIT',
-      install_requires=['keras'],
+      install_requires=['tensorflow'],
       extras_require={
           'model_saving': ['json', 'h5py'],
       },

@@ -1,3 +1,8 @@
+I forked a repository and rewrote it to run on tensorflow v2.  
+Here are the original readme: 
+
+------------
+
 Deep Learning on Graphs with Keras
 ====
 

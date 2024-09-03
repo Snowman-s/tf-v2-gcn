@@ -1,10 +1,7 @@
-from __future__ import print_function
-
-from keras import activations, initializers, constraints
-from keras import regularizers
-from keras.engine import Layer
-import keras.backend as K
-
+from tensorflow.keras import activations, initializers, constraints
+from tensorflow.keras import regularizers
+from tensorflow.keras.layers import Layer
+import tensorflow as tf
 
 class GraphConvolution(Layer):
     """Basic graph convolution layer as in https://arxiv.org/abs/1609.02907"""
@@ -63,17 +60,17 @@ class GraphConvolution(Layer):
             self.bias = None
         self.built = True
 
-    def call(self, inputs, mask=None):
+    def call(self, inputs):
         features = inputs[0]
         basis = inputs[1:]
 
-        supports = list()
+        supports = []
         for i in range(self.support):
-            supports.append(K.dot(basis[i], features))
-        supports = K.concatenate(supports, axis=1)
-        output = K.dot(supports, self.kernel)
+            supports.append(tf.matmul(tf.sparse.to_dense(basis[i]), features))
+        supports = tf.concat(supports, axis=1)
+        output = tf.matmul(supports, self.kernel)
 
-        if self.bias:
+        if self.bias is not None:
             output += self.bias
         return self.activation(output)
 
@@ -82,18 +79,12 @@ class GraphConvolution(Layer):
                   'support': self.support,
                   'activation': activations.serialize(self.activation),
                   'use_bias': self.use_bias,
-                  'kernel_initializer': initializers.serialize(
-                      self.kernel_initializer),
-                  'bias_initializer': initializers.serialize(
-                      self.bias_initializer),
-                  'kernel_regularizer': regularizers.serialize(
-                      self.kernel_regularizer),
-                  'bias_regularizer': regularizers.serialize(
-                      self.bias_regularizer),
-                  'activity_regularizer': regularizers.serialize(
-                      self.activity_regularizer),
-                  'kernel_constraint': constraints.serialize(
-                      self.kernel_constraint),
+                  'kernel_initializer': initializers.serialize(self.kernel_initializer),
+                  'bias_initializer': initializers.serialize(self.bias_initializer),
+                  'kernel_regularizer': regularizers.serialize(self.kernel_regularizer),
+                  'bias_regularizer': regularizers.serialize(self.bias_regularizer),
+                  'activity_regularizer': regularizers.serialize(self.activity_regularizer),
+                  'kernel_constraint': constraints.serialize(self.kernel_constraint),
                   'bias_constraint': constraints.serialize(self.bias_constraint)
         }
 

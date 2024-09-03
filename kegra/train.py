@@ -1,14 +1,14 @@
 from __future__ import print_function
 
-from keras.layers import Input, Dropout
-from keras.models import Model
-from keras.optimizers import Adam
-from keras.regularizers import l2
+import tensorflow as tf
+from tensorflow.keras.layers import Input, Dropout
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.regularizers import l2
+from tensorflow.keras.callbacks import EarlyStopping
 
 from kegra.layers.graph import GraphConvolution
 from kegra.utils import *
-
-import time
 
 # Define parameters
 DATASET = 'cora'
@@ -20,7 +20,7 @@ PATIENCE = 10  # early stopping patience
 
 # Get data
 X, A, y = load_data(dataset=DATASET)
-y_train, y_val, y_test, idx_train, idx_val, idx_test, train_mask = get_splits(y)
+y_train, y_val, y_test, idx_train, idx_val, idx_test, train_mask, val_mask, test_mask = get_splits(y)
 
 # Normalize X
 X /= X.sum(1).reshape(-1, 1)
@@ -31,7 +31,7 @@ if FILTER == 'localpool':
     A_ = preprocess_adj(A, SYM_NORM)
     support = 1
     graph = [X, A_]
-    G = [Input(shape=(None, None), batch_shape=(None, None), sparse=True)]
+    G = [Input(batch_shape=(None,None))]
 
 elif FILTER == 'chebyshev':
     """ Chebyshev polynomial basis filters (Defferard et al., NIPS 2016)  """
@@ -40,11 +40,11 @@ elif FILTER == 'chebyshev':
     L_scaled = rescale_laplacian(L)
     T_k = chebyshev_polynomial(L_scaled, MAX_DEGREE)
     support = MAX_DEGREE + 1
-    graph = [X]+T_k
-    G = [Input(shape=(None, None), batch_shape=(None, None), sparse=True) for _ in range(support)]
+    graph = [X] + T_k
+    G = [Input(batch_shape=(None,None)) for _ in range(support)]
 
 else:
-    raise Exception('Invalid filter type.')
+    raise ValueError('Invalid filter type.')
 
 X_in = Input(shape=(X.shape[1],))
 
@@ -58,48 +58,40 @@ Y = GraphConvolution(y.shape[1], support, activation='softmax')([H]+G)
 
 # Compile model
 model = Model(inputs=[X_in]+G, outputs=Y)
-model.compile(loss='categorical_crossentropy', optimizer=Adam(lr=0.01))
+model.compile(loss='categorical_crossentropy', optimizer=Adam(learning_rate=0.01), weighted_metrics=['accuracy'])
 
-# Helper variables for main training loop
-wait = 0
-preds = None
-best_val_loss = 99999
+class Logger(tf.keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        print("Epoch: {:04d}".format(epoch),
+          "train_loss= {:.4f}".format(logs["loss"]),
+          "train_acc= {:.4f}".format(logs["accuracy"]),
+          "val_loss= {:.4f}".format(logs["val_loss"]),
+          "val_acc= {:.4f}".format(logs["val_accuracy"]),
+        )
 
-# Fit
-for epoch in range(1, NB_EPOCH+1):
-
-    # Log wall-clock time
-    t = time.time()
-
-    # Single training iteration (we mask nodes without labels for loss calculation)
-    model.fit(graph, y_train, sample_weight=train_mask,
-              batch_size=A.shape[0], epochs=1, shuffle=False, verbose=0)
-
-    # Predict on full dataset
-    preds = model.predict(graph, batch_size=A.shape[0])
-
-    # Train / validation scores
-    train_val_loss, train_val_acc = evaluate_preds(preds, [y_train, y_val],
-                                                   [idx_train, idx_val])
-    print("Epoch: {:04d}".format(epoch),
-          "train_loss= {:.4f}".format(train_val_loss[0]),
-          "train_acc= {:.4f}".format(train_val_acc[0]),
-          "val_loss= {:.4f}".format(train_val_loss[1]),
-          "val_acc= {:.4f}".format(train_val_acc[1]),
-          "time= {:.4f}".format(time.time() - t))
-
-    # Early stopping
-    if train_val_loss[1] < best_val_loss:
-        best_val_loss = train_val_loss[1]
-        wait = 0
-    else:
-        if wait >= PATIENCE:
-            print('Epoch {}: early stopping'.format(epoch))
-            break
-        wait += 1
+# training iteration
+history = model.fit(
+    graph,
+    y_train,
+    sample_weight=train_mask,
+    batch_size=A.shape[0],
+    epochs=NB_EPOCH,
+    shuffle=False,
+    verbose=0,
+    validation_data=(graph, y_val, val_mask),
+    callbacks=[EarlyStopping(
+        monitor='val_loss',
+        patience=PATIENCE,
+        restore_best_weights=True
+    ), Logger()]
+)
 
 # Testing
-test_loss, test_acc = evaluate_preds(preds, [y_test], [idx_test])
+test_loss, test_acc = model.evaluate(graph, 
+    y_test, 
+    sample_weight=test_mask, 
+    batch_size=A.shape[0],
+    verbose=0)
 print("Test set results:",
-      "loss= {:.4f}".format(test_loss[0]),
-      "accuracy= {:.4f}".format(test_acc[0]))
+      "loss= {:.4f}".format(test_loss),
+      "accuracy= {:.4f}".format(test_acc))
